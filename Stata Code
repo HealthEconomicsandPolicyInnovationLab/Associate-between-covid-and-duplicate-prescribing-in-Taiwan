@@ -1,0 +1,123 @@
+gen bloodlipids_1 = bloodlipids * 100000
+gen bloodglucose_1 = bloodglucose * 100000
+gen bloodpressure_1 = bloodpressure * 100000
+
+* Compute pairwise correlations with tenpercent variable
+pwcorr RD_DM tenpercent, sig
+pwcorr RD_HL tenpercent, sig
+pwcorr RD_HT tenpercent, sig
+
+* Check descriptive statistics, including mean, standard deviation, minimum, and maximum values
+sum 
+
+* Calculate quartiles (Q1, Q2, Q3)
+summarize bloodglucose_1 bloodlipids_1 bloodpressure_1 time quarter region covid, detail
+
+tab1 region quarter covid
+
+* Perform multiple regression analyses
+reg bloodglucose_1 time i.quarter i.region i.covid
+vif
+reg bloodlipids_1 time i.quarter i.region i.covid
+vif
+reg bloodpressure_1 time i.quarter i.region i.covid
+vif
+
+* Conduct bivariate regression analyses
+  * bloodglucose
+  reg bloodglucose_1 time 
+  reg bloodglucose_1 i.quarter 
+  reg bloodglucose_1 i.region 
+  reg bloodglucose_1 i.covid
+
+  * bloodpressure
+  reg bloodpressure_1 time 
+  reg bloodpressure_1 i.quarter 
+  reg bloodpressure_1 i.region 
+  reg bloodpressure_1 i.covid
+
+  * bloodlipids
+  reg bloodlipids_1 time 
+  reg bloodlipids_1 i.quarter 
+  reg bloodlipids_1 i.region 
+  reg bloodlipids_1 i.covid
+
+* Perform Generalized Linear Model (GLM)
+glm bloodglucose_1 time i.quarter i.region i.covid, link(identity) family(gaussian)
+glm bloodlipids_1 time i.quarter i.region i.covid, link(identity) family(gaussian)
+glm bloodpressure_1 time i.quarter i.region i.covid, link(identity) family(gaussian)
+
+* Generate scatter plots and fitted lines for each variable
+twoway (scatter bloodglucose_1 tenpercent) (lfit bloodglucose_1 tenpercent), name(graph1, replace)
+twoway (scatter bloodlipids_1 tenpercent) (lfit bloodlipids_1 tenpercent), name(graph2, replace)
+twoway (scatter bloodpressure_1 tenpercent) (lfit bloodpressure_1 tenpercent), name(graph3, replace)
+
+* ARIMA TEST: Set parameters and perform stationarity tests
+
+tsset region time
+
+levelsof region, local(regions)
+foreach r of local regions {
+    display "ADF test for region `r'"
+    dfuller bloodglucose_1 if region == `r', regress lags(5)
+}
+* Result: The p-values for all regions are greater than 0.05 (minimum ~0.12, maximum ~0.94), indicating that the bloodglucose_1 variable is not stationary in all regions. At least one differencing (d = 1) is needed to achieve stationarity.
+
+generate D_bloodglucose_1 = D.bloodglucose_1
+xtset
+xtunitroot llc bloodglucose_1, lags(5) demean
+* p-value < 0.05 indicates that the series becomes stationary after first differencing (d = 1). This means the bloodglucose_1 variable only requires one differencing to achieve stationarity.
+
+levelsof region, local(regions)
+foreach r of local regions {
+    display "ACF for region `r'"
+    ac bloodglucose_1 if region == `r', lags(10) name(acf_r`r', replace)
+    pac bloodglucose_1 if region == `r', lags(10) name(pacf_r`r', replace)
+}
+graph combine acf_r*, title("ACF for all regions")
+graph combine pacf_r*, title("PACF for all regions")
+
+* ACF Analysis: Significant values at lag 2, 4, 6, 8 without immediate cut-off. ACF shows slow decay, possibly indicating the presence of AR(p) terms or that the series remains non-stationary.
+
+
+
+* Fit ARIMA models for bloodglucose_1
+levelsof region, local(regions)
+foreach r of local regions {
+    display "Fitting ARIMA(2,1,1) for region `r'"
+    arima bloodglucose_1 if region == `r', arima(2,1,1)
+    estat ic
+}
+
+levelsof region, local(regions)
+foreach r of local regions {
+    display "Fitting ARIMA(2,1,2) for region `r'"
+    arima bloodglucose_1 if region == `r', arima(2,1,2)
+    estat ic
+}
+* Conclusion: ARIMA(2,1,2) is selected as the best model based on lower AIC and BIC values, indicating better fit and predictive performance.
+
+* Repeat analyses for bloodpressure_1 and bloodlipids_1 with appropriate ARIMA models and panel data methods
+
+* Perform dynamic panel analysis using Fixed Effects (FE) and Random Effects (RE) models for bloodlipids_1
+xtset region time
+xtreg bloodlipids_1 i.covid time i.quarter i.region, re vce(robust)
+
+xtsum region
+xtreg bloodlipids_1 i.covid time i.quarter, fe
+estimates store fe
+xtreg bloodlipids_1 i.covid time i.quarter i.region, re
+estimates store re
+hausman fe re
+
+* Result: P-value (Prob > chi2 = 1.0000) > 0.05 indicates the Random Effects model is preferred over Fixed Effects.
+
+* Generate predictive models for bloodlipids_1, bloodglucose_1, and bloodpressure_1 using ARIMA and panel data regression
+
+* Create visualizations comparing actual and predicted values
+twoway (line bloodlipids_1 time, sort lcolor(black) lwidth(medium) lpattern(solid)) ///
+    (line arima_pred_adj time, sort lcolor(red) lwidth(medium) lpattern(dash)) ///
+    (line re_pred time, sort lcolor(blue) lwidth(medium) lpattern(dash)), ///
+    title("Figure 1c Actual vs Predicted Blood Lipids") ///
+    ytitle("Blood Lipids and Predicted Values") xtitle("Time") ///
+    legend(order(1 "Actual" 2 "ARIMA" 3 "Fixed Effect"))
